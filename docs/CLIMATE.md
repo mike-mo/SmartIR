@@ -23,22 +23,48 @@ _Please note that the device_code field only accepts positive numbers. The .json
 
 Climate commands are serialized per entity. SmartIR looks up the requested
 mode, temperature, fan and swing combination and checks that its command is a
-nonempty string or list of nonempty strings before sending an optional `on`
-preamble. It waits for the controller call to finish before saving and publishing
-the requested settings, including `last_on_operation`.
+nonempty string or list of nonempty strings. The controller validates and converts
+the entire selected sequence before sending an optional `on` preamble, including
+Broadlink Base64/Hex/Pronto decoding and ESPHome JSON parsing. The
+prepared payloads are what get sent. SmartIR waits for the controller or service
+handler to finish before saving and publishing the requested settings, including
+`last_on_operation`.
 
-Missing or malformed commands and transport failures raise Home Assistant
-errors. A failed request leaves the previously committed settings unchanged and
-does not prevent later requests from running. The Broadlink, Xiaomi, MQTT and
+Preparation rejects invalid local encodings and controller-incompatible command
+lists, but does not infer device packet semantics. Broadlink Base64 retains Home
+Assistant's permissive decoding and missing-padding support. ESPHome's configured
+service still validates its own argument types; SmartIR parses JSON without
+restricting custom services to one array type. A service-schema rejection can
+therefore still occur after a preamble, just like a surfaced operational error.
+
+Missing or locally malformed commands raise Home Assistant validation errors.
+Errors surfaced by a controller or service handler reach the caller, leave the
+previously committed settings unchanged, and do not prevent later requests from
+running. The Broadlink, Xiaomi, MQTT and
 ESPHome controllers wait for their Home Assistant service handler to finish.
 The LOOKin controller also checks for HTTP error responses.
 
-These are **assumed settings, not physical acknowledgement**. A completed service
-call or HTTP request does not prove that the appliance received or applied the
-IR command. If an `on` preamble or part of a command list was transmitted before
-a later failure, SmartIR cannot undo it. The old settings remain committed even
-though the physical appliance may have changed. Power-sensor observations are
-applied after an in-flight command and may independently change the reported mode.
+**Handler completion does not prove transport success.** In Home Assistant
+2026.8.3, the Broadlink remote handler returns normally when the remote is Off.
+It also catches and logs `BroadlinkException` and `OSError` during sends without
+raising them. SmartIR cannot distinguish those known no-ops or operational
+failures from successful handler completion, and will commit assumed settings.
+`blocking=True` propagates errors only when the handler surfaces them. Stronger
+error propagation requires a separate Home Assistant Broadlink change.
+
+These are also **assumed settings, not physical acknowledgement**. Even a
+completed transport operation does not prove that the appliance applied the IR
+command. If an `on` preamble or part of a command list was transmitted before a
+later surfaced error or cancellation, SmartIR cannot undo it. The old settings
+remain committed even though the physical appliance may have changed.
+Power-sensor observations are applied after an in-flight command and may
+independently change the reported mode.
+
+The controller completion behavior is shared with the fan, light and media-player
+platforms. Those platforms still have their existing optimistic state updates and
+error logging; this change does not make their settings transactional. In
+particular, a surfaced error stops a light's remaining repeated steps. No automatic
+retry or rollback is added.
 
 Temperature, fan and swing changes while Off are remembered without transmitting.
 An explicit Off request still sends the Off command. Combined mode and temperature

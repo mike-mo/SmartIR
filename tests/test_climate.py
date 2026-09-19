@@ -1,6 +1,7 @@
 """Actual-source transaction regressions with synthetic codes and fake services."""
 
 import asyncio
+from base64 import b64decode, b64encode
 import unittest
 from collections import deque
 from types import SimpleNamespace
@@ -15,8 +16,13 @@ from tests.support import (
 climate, controller = load_source()
 
 
+def encoded(label):
+    """Synthetic bytes, never a captured appliance command."""
+    return b64encode(label.encode()).decode()
+
+
 class Services:
-    """Separate service submission from completion, including deferred failures."""
+    """Separate service submission from handler completion and surfaced errors."""
 
     def __init__(self):
         self.calls = []
@@ -45,22 +51,22 @@ class Services:
 
 
 def device_data(swing=False, preamble=False):
-    commands = {"off": "off-code"}
+    commands = {"off": encoded("off-code")}
     for mode in ("cool", "heat"):
         commands[mode] = {}
         for fan in ("auto", "high"):
             if swing:
                 commands[mode][fan] = {
-                    position: {str(temp): f"{mode}-{fan}-{position}-{temp}"
+                    position: {str(temp): encoded(f"{mode}-{fan}-{position}-{temp}")
                                for temp in range(18, 26)}
                     for position in ("off", "auto")
                 }
             else:
                 commands[mode][fan] = {
-                    str(temp): f"{mode}-{fan}-{temp}" for temp in range(18, 26)
+                    str(temp): encoded(f"{mode}-{fan}-{temp}") for temp in range(18, 26)
                 }
     if preamble:
-        commands["on"] = "on-code"
+        commands["on"] = encoded("on-code")
     return {
         "manufacturer": "Test", "supportedModels": ["Synthetic"],
         "supportedController": "Broadlink", "commandsEncoding": "Base64",
@@ -105,9 +111,10 @@ class ClimateTransactions(unittest.IsolatedAsyncioTestCase):
                 await self.cancel_task(task)
 
     def codes(self):
-        return [call.data["command"] for call in self.hass.services.calls]
+        return [["b64:" + b64decode(code[4:]).decode() for code in call.data["command"]]
+                for call in self.hass.services.calls]
 
-    async def test_waits_for_completion_before_state_commit(self):
+    async def test_waits_for_handler_completion_before_state_commit(self):
         entity = self.make_entity()
         before = settings(entity)
         gate = self.gate()
@@ -248,8 +255,8 @@ class ClimateTransactions(unittest.IsolatedAsyncioTestCase):
 
     async def test_preamble_and_lists_await_completion_in_order(self):
         entity = self.make_entity(preamble=True)
-        entity._commands["on"] = ["on-one", "on-two"]
-        entity._commands["cool"]["auto"]["18"] = ["setting-one", "setting-two"]
+        entity._commands["on"] = [encoded("on-one"), encoded("on-two")]
+        entity._commands["cool"]["auto"]["18"] = [encoded("setting-one"), encoded("setting-two")]
         first_gate, second_gate = self.gate(), self.gate()
         task = await self.start(entity.async_turn_on())
         self.assertEqual(self.codes(), [["b64:on-one", "b64:on-two"]])
@@ -383,7 +390,7 @@ class ClimateTransactions(unittest.IsolatedAsyncioTestCase):
             with self.subTest(precision=precision):
                 entity = self.make_entity()
                 entity._precision = precision
-                entity._commands["cool"]["auto"][str(expected)] = "rounded-code"
+                entity._commands["cool"]["auto"][str(expected)] = encoded("rounded-code")
                 await entity.async_set_temperature(temperature=requested, hvac_mode="cool")
                 self.assertEqual(entity.target_temperature, expected)
                 self.assertEqual(self.codes(), [["b64:rounded-code"]])
@@ -454,8 +461,8 @@ class ClimateTransactions(unittest.IsolatedAsyncioTestCase):
 class Controllers(unittest.IsolatedAsyncioTestCase):
     async def test_service_controllers_preserve_payload_and_wait_for_errors(self):
         cases = [
-            ("Broadlink", "Base64", ["one", "two"], "remote", "send_command",
-             {"entity_id": "target", "command": ["b64:one", "b64:two"], "delay_secs": 0.5}),
+            ("Broadlink", "Base64", ["b25l", "dHdv"], "remote", "send_command",
+             {"entity_id": "target", "command": ["b64:b25l", "b64:dHdv"], "delay_secs": 0.5}),
             ("Broadlink", "Hex", "0102", "remote", "send_command",
              {"entity_id": "target", "command": ["b64:AQI="], "delay_secs": 0.5}),
             ("Xiaomi", "Raw", "raw-code", "remote", "send_command",
@@ -503,11 +510,12 @@ class Controllers(unittest.IsolatedAsyncioTestCase):
                 response.raise_for_status.side_effect = failure
                 hass = SimpleNamespace(async_add_executor_job=AsyncMock(return_value=response))
                 instance = controller.get_controller(hass, "LOOKin", "Pronto", "test.local", 0.5)
+                command = "0000 006D 0001 0000 0010 0010"
                 if failure:
                     with self.assertRaises(requests.HTTPError):
-                        await instance.send("test-code")
+                        await instance.send(command)
                 else:
-                    await instance.send("test-code")
+                    await instance.send(command)
                 hass.async_add_executor_job.assert_awaited_once_with(
-                    requests.get, "http://test.local/commands/ir/prontohex/test-code")
+                    requests.get, f"http://test.local/commands/ir/prontohex/{command}")
                 response.raise_for_status.assert_called_once_with()

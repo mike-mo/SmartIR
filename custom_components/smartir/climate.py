@@ -386,20 +386,22 @@ class SmartIRClimate(ClimateEntity, RestoreEntity):
                 f"No command for HVAC mode {operation_mode}, fan {fan_mode}, "
                 f"swing {swing_mode}, temperature {temperature}") from err
 
-        # Validate both leaves before a preamble can partially operate the device.
-        commands = [command]
+        commands = []
         if operation_mode != HVACMode.OFF and 'on' in self._commands:
             commands.append(on_command)
+        commands.append(command)
         for selected_command in commands:
             codes = selected_command if isinstance(selected_command, list) else [selected_command]
             if not codes or any(not isinstance(code, str) or not code for code in codes):
                 raise ServiceValidationError("IR commands must be nonempty strings or lists of strings")
 
+        # Prepare the entire sequence before a preamble can operate the device.
+        prepared = [self._controller.prepare(selected) for selected in commands]
         try:
-            if on_command is not None:
-                await self._controller.send(on_command)
-                await asyncio.sleep(self._delay)
-            await self._controller.send(command)
+            for index, payload in enumerate(prepared):
+                if index:
+                    await asyncio.sleep(self._delay)
+                await self._controller.send_prepared(payload)
         except HomeAssistantError:
             raise
         except Exception as err:

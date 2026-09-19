@@ -1,9 +1,12 @@
 """Import actual source with small HA boundary substitutes, without starting HA."""
 
+import ast
+import binascii
 import importlib
+import struct
 from enum import IntFlag, StrEnum
 from pathlib import Path
-from types import ModuleType, SimpleNamespace
+from types import ModuleType
 from unittest.mock import patch
 
 import voluptuous as vol
@@ -91,9 +94,16 @@ def load_source():
            positive_float=float, entity_id=str, boolean=bool)
 
     source = Path(__file__).resolve().parents[1] / "custom_components" / "smartir"
+    # Execute the actual conversion helpers without running integration startup.
+    tree = ast.parse((source / "__init__.py").read_text(encoding="utf-8"))
+    helper = next(node for node in tree.body
+                  if isinstance(node, ast.ClassDef) and node.name == "Helper")
+    namespace = {"binascii": binascii, "struct": struct}
+    exec(compile(ast.Module(body=[helper], type_ignores=[]),
+                 str(source / "__init__.py"), "exec"), namespace)
     # Bypass integration startup/downloads, but load unmodified climate/controller.
     module("smartir_test", __path__=[str(source)], COMPONENT_ABS_DIR=str(source),
-           Helper=SimpleNamespace())
+           Helper=namespace["Helper"])
     with patch.dict("sys.modules", modules):
         climate = importlib.import_module("smartir_test.climate")
         controller = importlib.import_module("smartir_test.controller")
