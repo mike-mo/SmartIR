@@ -19,6 +19,38 @@ _Please note that the device_code field only accepts positive numbers. The .json
 | `power_sensor` | string | optional | *entity_id* for a sensor that monitors whether your device is actually `on` or `off`. This may be a power monitor sensor. (Accepts only on/off states) |
 | `power_sensor_restore_state` | boolean | optional | If `power_sensor` is set, and the device is likely to turn off and back on while still in the set mode (for instance, a minisplit cycling on and off while in heating or cooling mode), setting this to `true` will cause the climate state to update dynamically, following the state of the `power_sensor`. |
 
+## Command completion and assumed state
+
+Climate commands are serialized per entity. SmartIR looks up the requested
+mode, temperature, fan and swing combination and checks that its command is a
+nonempty string or list of nonempty strings before sending an optional `on`
+preamble. It waits for the controller call to finish before saving and publishing
+the requested settings, including `last_on_operation`.
+
+Missing or malformed commands and transport failures raise Home Assistant
+errors. A failed request leaves the previously committed settings unchanged and
+does not prevent later requests from running. The Broadlink, Xiaomi, MQTT and
+ESPHome controllers wait for their Home Assistant service handler to finish.
+The LOOKin controller also checks for HTTP error responses.
+
+These are **assumed settings, not physical acknowledgement**. A completed service
+call or HTTP request does not prove that the appliance received or applied the
+IR command. If an `on` preamble or part of a command list was transmitted before
+a later failure, SmartIR cannot undo it. The old settings remain committed even
+though the physical appliance may have changed. Power-sensor observations are
+applied after an in-flight command and may independently change the reported mode.
+
+Temperature, fan and swing changes while Off are remembered without transmitting.
+An explicit Off request still sends the Off command. Combined mode and temperature
+requests use one transaction. Startup restoration sends no command. Repeated
+On requests retain their existing behavior and may transmit again.
+
+This behavior does not add temperature-unit conversion or mode-specific profile
+capabilities. Profile temperatures still use Home Assistant's configured units;
+check that the code file's numeric range matches those units. The profile's global
+temperature, fan and swing options do not describe restrictions for individual
+modes.
+
 ## Example (using broadlink controller):
 Add a Broadlink RM device named "Bedroom" via config flow (read the [docs](https://www.home-assistant.io/integrations/broadlink/)).
 

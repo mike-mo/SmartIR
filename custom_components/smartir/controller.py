@@ -109,7 +109,7 @@ class BroadlinkController(AbstractController):
         }
 
         await self.hass.services.async_call(
-            'remote', 'send_command', service_data)
+            'remote', 'send_command', service_data, blocking=True)
 
 
 class XiaomiController(AbstractController):
@@ -129,7 +129,7 @@ class XiaomiController(AbstractController):
         }
 
         await self.hass.services.async_call(
-            'remote', 'send_command', service_data)
+            'remote', 'send_command', service_data, blocking=True)
 
 
 class MQTTController(AbstractController):
@@ -149,7 +149,7 @@ class MQTTController(AbstractController):
         }
 
         await self.hass.services.async_call(
-            'mqtt', 'publish', service_data)
+            'mqtt', 'publish', service_data, blocking=True)
 
 
 class LookinController(AbstractController):
@@ -166,7 +166,8 @@ class LookinController(AbstractController):
         encoding = self._encoding.lower().replace('pronto', 'prontohex')
         url = f"http://{self._controller_data}/commands/ir/" \
                 f"{encoding}/{command}"
-        await self.hass.async_add_executor_job(requests.get, url)
+        response = await self.hass.async_add_executor_job(requests.get, url)
+        response.raise_for_status()
 
 
 class ESPHomeController(AbstractController):
@@ -183,4 +184,4 @@ class ESPHomeController(AbstractController):
         service_data = {'command':  json.loads(command)}
 
         await self.hass.services.async_call(
-            'esphome', self._controller_data, service_data)
+            'esphome', self._controller_data, service_data, blocking=True)
