@@ -2,7 +2,6 @@ name: Command regressions
 
 on:
   push:
-    branches: [master]
   pull_request:
     branches: [master]
 
@@ -13,8 +12,6 @@ jobs:
   isolated:
     runs-on: ubuntu-latest
     timeout-minutes: 10
-    env:
-      SMARTIR_BROADLINK_SOURCE: ${{ runner.temp }}/ha-broadlink-remote.py
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -22,11 +19,15 @@ jobs:
           python-version: "3.13"
       - run: python -m pip install -r tests/requirements.txt
       - name: Obtain pinned upstream source for native-method contracts
+        env:
+          SMARTIR_BROADLINK_SOURCE: ${{ runner.temp }}/ha-broadlink-remote.py
         run: >-
           curl --fail --location --retry 3
           https://raw.githubusercontent.com/home-assistant/core/2026.8.3/homeassistant/components/broadlink/remote.py
           --output "$SMARTIR_BROADLINK_SOURCE"
       - name: Run isolated regressions and hash-verified native-method contracts
+        env:
+          SMARTIR_BROADLINK_SOURCE: ${{ runner.temp }}/ha-broadlink-remote.py
         run: python -B -m unittest discover -s tests -v
 
   native-ha:
